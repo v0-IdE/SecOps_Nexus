@@ -1,0 +1,479 @@
+//AuditRelated
+//PIM Role elevations over 30 days
+AuditLogs
+| where TimeGenerated >= ago(30d)
+| where OperationName =~ "Add member to role completed (PIM activation)"
+| where Result =~ "success"
+| extend TargetUserPrincipalName = tostring(TargetResources[2].userPrincipalName)
+| extend displayName = tostring(TargetResources[0].displayName)
+| extend displayName2 = tostring(TargetResources[3].displayName)
+| extend ElevatedRole = iif(displayName =~ "Member", displayName2, displayName)
+| project TimeGenerated, User=TargetUserPrincipalName, ElevatedRole, ResultReason
+| summarize Elevations=count() by User
+| sort by Elevations desc
+
+//Conditional Access - Useful Extensions
+SigninLogs
+| where TimeGenerated >= ago(10d)
+| extend Device = parse_json(DeviceDetail)
+| extend isManaged = tostring(Device.isManaged)
+| extend isCompliant = tostring(Device.isCompliant)
+| extend operatingSystem = tostring(Device.operatingSystem)
+| extend DeviceName = tostring(Device.displayName)
+| extend deviceId = tostring(Device.deviceId)
+| extend trustType = tostring(Device.trustType)
+| mv-expand TokenProtectionStatusDetails
+| extend TokenStatus = tostring(TokenProtectionStatusDetails.signInSessionStatus)
+| extend TokenCode = tostring(TokenProtectionStatusDetails.signInSessionStatusCode)
+| extend TrustedLocation = extract(@'\"networkNames\"\:\[\"(.+)\"\]', 1, NetworkLocationDetails)
+| extend IsCAEToken = extract(@'"key":"Is CAE Token","value":"([^;]+)"}]', 1, AuthenticationProcessingDetails)
+| extend Scope = replace_string(extract(@'"key":"Oauth Scope Info","value":"\[\\([^+]+)\\",', 1, AuthenticationProcessingDetails),'"','')
+| extend OATHscope = replace_string(Scope,"\\,\\",", ")
+| extend Scopes = extract_all(@"(\S*(?:\.Create|\.ReadWrite\S*)),", tostring(OATHscope))
+| project-away Scope, OATHscope
+| mv-expand ConditionalAccessPolicies
+| summarize Logins=count(), PolicySuccess = make_set_if(ConditionalAccessPolicies, ConditionalAccessPolicies.result contains "uccess"), PolicyFail = make_set_if(ConditionalAccessPolicies, ConditionalAccessPolicies.result contains "ailure") by UserPrincipalName, IsCAEToken, isCompliant, isManaged, DeviceName, operatingSystem, TokenStatus, TokenCode, tostring(Scopes), cScopes=array_length(Scopes)
+| sort by cScopes, Logins
+
+//Find which users are failing the most Conditional Access policies, retrieve the total failure count, distinct policy count and the names of the failed policies
+SigninLogs
+| where TimeGenerated > ago (30d)
+| project TimeGenerated, ConditionalAccessPolicies, UserPrincipalName
+| mv-expand ConditionalAccessPolicies
+| extend CAResult = tostring(ConditionalAccessPolicies.result)
+| extend CAPolicyName = tostring(ConditionalAccessPolicies.displayName)
+| where CAResult == "failure"
+| summarize
+    ['Total Conditional Access Failures']=count(),
+    ['Distinct Policy Failure Count']=dcount(CAPolicyName),
+    ['Policy Names']=make_set(CAPolicyName)
+    by UserPrincipalName
+| sort by ['Distinct Policy Failure Count'] desc 
+
+//Text only MFA accounts
+SigninLogs
+| where TimeGenerated > ago(30d)
+| where UserType == "Member"
+| mv-expand todynamic(AuthenticationDetails)
+| extend ['Authentication Method'] = tostring(AuthenticationDetails.authenticationMethod)
+| where ['Authentication Method'] !in ("Previously satisfied", "Password", "Other")
+| where isnotempty(['Authentication Method'])
+| summarize
+    ['Count of distinct MFA Methods']=dcount(['Authentication Method']),
+    ['List of MFA Methods']=make_set(['Authentication Method'])
+    by UserPrincipalName
+//Find users with only one method found and it is text message
+| where ['Count of distinct MFA Methods'] == 1 and ['List of MFA Methods'] has "text"
+
+//Pivot against all CA's for status
+SigninLogs
+| where TimeGenerated >= ago (10d)
+| extend CA = parse_json(ConditionalAccessPolicies)
+| mv-expand bagexpansion=array CA
+| evaluate bag_unpack(CA)
+| extend
+    ['CA Outcome']=tostring(column_ifexists('result', "")),
+    ['CA Policy Name'] = column_ifexists('displayName', "")
+| evaluate pivot(['CA Outcome'], count(), ['CA Policy Name'])
+
+//Pivot2 with Device Filters
+SigninLogs
+| where TimeGenerated >= ago (10d)
+| extend Device = parse_json(DeviceDetail)
+| extend isManaged = Device.isManaged
+| extend isCompliant = Device.isCompliant
+| extend operatingSystem = Device.operatingSystem
+| where operatingSystem matches regex @"(Windows|mac)"
+| extend CA = parse_json(ConditionalAccessPolicies)
+| mv-expand bagexpansion=array CA
+| evaluate bag_unpack(CA)
+| extend
+    ['CA Outcome']=tostring(column_ifexists('result', "")),
+    ['CA Policy Name'] = column_ifexists('displayName', "")
+| evaluate pivot(['CA Outcome'], count(), ['CA Policy Name'])
+| where ['CA Policy Name'] matches regex @"(ConditionalAccessPolicyName)" 
+
+//Summarized failures against single policy
+SigninLogs
+| where TimeGenerated > ago(12h)
+| where ConditionalAccessPolicies != "[]"
+| mv-expand ConditionalAccessPolicies
+| extend CAName = ConditionalAccessPolicies.displayName
+| where CAName contains "CA219"
+| extend
+    result = ConditionalAccessPolicies["result"],
+    failureReason = tostring(Status["failureReason"])
+| project-away ConditionalAccessPolicies
+| where result == "failure"
+| summarize Logins=count() by UserPrincipalName, AppDisplayName, failureReason
+| sort by Logins desc
+
+//Fun Extract/expands
+SigninLogs
+| where TimeGenerated >= ago(90d)
+| extend IsCAEToken = extract(@'"key":"Is CAE Token","value":"([^;]+)"}]', 1, AuthenticationProcessingDetails)
+| extend Scope = replace_string(extract(@'"key":"Oauth Scope Info","value":"\[\\([^+]+)\\",', 1, AuthenticationProcessingDetails),'"','')
+| extend OATHscope = replace_string(Scope,"\\,\\",", ")
+| extend Scopes = extract_all(@"(\S*(?:\.Create|\.ReadWrite\S*)),", tostring(OATHscope))
+
+//High perms by max logins
+SigninLogs
+| where TimeGenerated >= ago(90d)
+| extend IsCAEToken = extract(@'"key":"Is CAE Token","value":"([^;]+)"}]', 1, AuthenticationProcessingDetails)
+| extend Scope = replace_string(extract(@'"key":"Oauth Scope Info","value":"\[\\([^+]+)\\",', 1, AuthenticationProcessingDetails),'"','')
+| extend OATHscope = replace_string(Scope,"\\,\\",", ")
+| extend Scopes = extract_all(@"(\S*(?:\.Create|\.ReadWrite\S*)),", tostring(OATHscope))
+| where not(TokenProtectionStatusDetails matches regex "unbound")
+| project-away Scope, OATHscope
+| summarize logins=count() by UserPrincipalName, tostring(Scopes), DistinctReadWriteCreateScopes=array_length(Scopes)
+| sort by DistinctReadWriteCreateScopes, logins
+| project-reorder logins, DistinctReadWriteCreateScopes, UserPrincipalName, Scopes
+
+//High risk logins
+let RiskyScopes = dynamic(['MailboxSettings.ReadWrite','Directory.ReadWrite.All','User.ReadWrite.All','Directory.AccessAsUser.All','Files.ReadWrite.All','Sites.ReadWrite.All','Application.ReadWrite.All,Chat.ReadWrite.All','Notes.ReadWrite.All','User.ReadWrite.All','RoleManagement.ReadWrite.Directory','AppRoleAssignment.ReadWrite.All,Group.ReadWrite.All','GroupMember.ReadWrite.All','ServicePrincipal.ReadWrite.All','ManagedIdentity.ReadWrite.All','Subscription.ReadWrite.All','ResourceGroup.ReadWrite.All','VirtualMachine.ReadWrite','StorageAccount.ReadWrite','KeyVault.ReadWrite.All']);
+SigninLogs
+| where TimeGenerated >= ago(90d)
+| extend Device = parse_json(DeviceDetail)
+| extend isManaged = tostring(Device.isManaged)
+| extend isCompliant = tostring(Device.isCompliant)
+| extend operatingSystem = tostring(Device.operatingSystem)
+| extend DeviceName = tostring(Device.displayName)
+| extend deviceId = tostring(Device.deviceId)
+| extend trustType = tostring(Device.trustType)
+| mv-expand TokenProtectionStatusDetails
+| extend TokenStatus = tostring(TokenProtectionStatusDetails.signInSessionStatus)
+| extend TokenCode = tostring(TokenProtectionStatusDetails.signInSessionStatusCode)
+| extend TrustedLocation = extract(@'\"networkNames\"\:\[\"(.+)\"\]', 1, NetworkLocationDetails)
+| extend IsCAEToken = extract(@'"key":"Is CAE Token","value":"([^;]+)"}]', 1, AuthenticationProcessingDetails)
+| extend Scope = replace_string(extract(@'"key":"Oauth Scope Info","value":"\[\\([^+]+)\\",', 1, AuthenticationProcessingDetails),'"','')
+| extend OATHscope = replace_string(Scope,"\\,\\",", ")
+| extend Scopes = extract_all(@"(\S*(?:\.Create|\.ReadWrite\S*)),", tostring(OATHscope))
+| project-away Scope, OATHscope
+| extend rScopes = set_intersect(RiskyScopes,Scopes)
+| mv-expand ConditionalAccessPolicies
+| summarize Logins=count(), PolicySuccess = make_set_if(ConditionalAccessPolicies, ConditionalAccessPolicies.result contains "uccess"), PolicyFail = make_set_if(ConditionalAccessPolicies, ConditionalAccessPolicies.result contains "ailure") by UserPrincipalName, IsCAEToken, isCompliant, isManaged, DeviceName, operatingSystem, TokenStatus, TokenCode, tostring(Scopes), cScopes=array_length(Scopes), tostring(rScopes), RcScopes=array_length(rScopes)
+| sort by RcScopes, Logins
+| where TokenStatus != 'bound' and IsCAEToken == 'False' and ( isCompliant != 'true' or isManaged != 'true')
+//Add a ResultDescription/ResultType for overall session breakdown
+
+//Email
+let emails=(EmailEvents
+| where TimeGenerated >= ago(2d)
+| where SenderMailFromDomain contains "Domain"
+| where EmailDirection == "Inbound"
+| where LatestDeliveryAction != 'Delivered'
+| where DeliveryLocation == 'Quarantine'
+| where UrlCount != 0
+| where AttachmentCount != 0
+| summarize Recipients=count() by NetworkMessageId);
+EmailEvents
+| where TimeGenerated >= ago(2d)
+| join emails on NetworkMessageId
+| join kind=leftouter EmailAttachmentInfo on NetworkMessageId
+| join kind=leftouter EmailUrlInfo on NetworkMessageId
+| summarize AttachList = make_set(FileName), AttSizeKB = format_bytes(sum(FileSize),2,"KB"), URLs = make_set(Url) by Recipients, SenderFromAddress, Subject, AttachmentCount, NetworkMessageId, Timestamp, ReportId, RecipientEmailAddress, EmailClusterId, InternetMessageId, SenderObjectId, RecipientObjectId
+
+//Gather hits on Rare Process as a Service incident type that is not already in KnownProcesses Watchlist with summarized ArgumentsList, Gather last login details, Summarize Executables running UnknownProcesses with last login & ArgumentList. Has a hard filter for csc.exe with args representative of SenseIR Defender Scans. - An improvement to the Rare Process as a Service analytic rule that expedites discovery
+let LookupTime = 14d;
+let normalize = (name:string) { replace(" ", "", tolower(name)) };
+let WhiteList = materialize(_GetWatchlist('KnownProcesses') | project ProcessName = tolower(replace(" ", "", trim(" ", tostring(processName)))));
+let KnownProc = toscalar(WhiteList | summarize make_set(ProcessName));
+let UserLogons = (DeviceLogonEvents
+| where TimeGenerated >= ago(14d)
+| where ActionType contains "Success" and not(AccountDomain matches regex "(font driver host|microsoftaccount|window manager)") and isnotempty(IsLocalAdmin) and LogonType contains "Interactive"
+| summarize arg_max(TimeGenerated, *) by DeviceId
+| project LastLogon=TimeGenerated, LastUser=tolower(tostring(AccountName)), LogonType, IsLocalAdmin, LastDevice=DeviceName, DeviceId);
+let GetServices = materialize (
+DeviceProcessEvents
+| where TimeGenerated > ago(LookupTime)
+| where InitiatingProcessParentFileName contains "services.exe"
+| where not(normalize(InitiatingProcessFileName) has_any (KnownProc))
+| project TimeGenerated, DeviceName, DeviceId, StartedChildProcess = FileName, StartedChildProcessSHA1 = SHA1, StartedChildProcessCmdline = ProcessCommandLine, ServiceProcessSHA1 = InitiatingProcessSHA1, ServiceProcess = InitiatingProcessFileName, ServiceProcessCmdline = InitiatingProcessCommandLine, ServiceProcessID = InitiatingProcessId, ServiceProcessCreationTime = InitiatingProcessCreationTime, Description = tostring(InitiatingProcessVersionInfoFileDescription), Company = tostring(InitiatingProcessVersionInfoCompanyName), ServiceProcessUser = InitiatingProcessAccountName
+);
+GetServices
+| summarize count() by ServiceProcess, DeviceName
+| where count_ < 6
+| join kind = inner GetServices on ServiceProcess, DeviceName
+| join kind = leftouter (
+DeviceNetworkEvents
+| where TimeGenerated > ago(LookupTime)
+| where InitiatingProcessParentFileName contains "services.exe"
+| where not(normalize(InitiatingProcessFileName) has_any (KnownProc))
+| project TimeGenerated, DeviceName, DeviceId, ServiceProcessSHA1 = InitiatingProcessSHA1, ServiceProcess = InitiatingProcessFileName, ServiceProcessCmdline = InitiatingProcessCommandLine, ServiceProcessID = InitiatingProcessId, ServiceProcessCreationTime = InitiatingProcessCreationTime, ServiceProcessUser = InitiatingProcessAccountName, NetworkAction = ActionType, RemoteIP, RemoteUrl
+) on DeviceName, ServiceProcess, ServiceProcessCmdline, ServiceProcessCreationTime, ServiceProcessID, ServiceProcessUser, ServiceProcessSHA1
+| join kind = leftouter (
+DeviceFileEvents
+| where TimeGenerated > ago(LookupTime)
+| where InitiatingProcessParentFileName contains "services.exe"
+| where not(normalize(InitiatingProcessFileName) has_any (KnownProc))
+| project TimeGenerated, DeviceName, DeviceId, ServiceProcessSHA1 = InitiatingProcessSHA1, ServiceProcess = InitiatingProcessFileName, ServiceProcessCmdline = InitiatingProcessCommandLine, ServiceProcessID = InitiatingProcessId, ServiceProcessCreationTime = InitiatingProcessCreationTime, ServiceProcessUser = InitiatingProcessAccountName, FileAction = ActionType, ModifiedFile = FileName, ModifiedFileSHA1 = SHA1, ModifiedFilePath = FolderPath
+) on DeviceName, ServiceProcess, ServiceProcessCmdline, ServiceProcessCreationTime, ServiceProcessID, ServiceProcessUser, ServiceProcessSHA1
+| join kind = leftouter (
+DeviceImageLoadEvents
+| where TimeGenerated > ago(LookupTime)
+| where InitiatingProcessParentFileName contains "services.exe"
+| where not(normalize(InitiatingProcessFileName) has_any (KnownProc))
+| project TimeGenerated, DeviceName, DeviceId, ServiceProcessSHA1 = InitiatingProcessSHA1, ServiceProcess = InitiatingProcessFileName, ServiceProcessCmdline = InitiatingProcessCommandLine, ServiceProcessID = InitiatingProcessId, ServiceProcessCreationTime = InitiatingProcessCreationTime, ServiceProcessUser = InitiatingProcessAccountName, LoadedDLL = FileName, LoadedDLLSHA1 = SHA1, LoadedDLLPath = FolderPath
+) on DeviceName, DeviceId, ServiceProcess, ServiceProcessCmdline, ServiceProcessCreationTime, ServiceProcessID, ServiceProcessUser, ServiceProcessSHA1
+| summarize ConnectedAddresses = make_set(RemoteIP, 100000), ConnectedUrls = make_set(RemoteUrl, 100000), FilesModified = make_set(ModifiedFile, 100000),FileModFolderPath = make_set(ModifiedFilePath, 100000),FileModHA1s = make_set(ModifiedFileSHA1, 100000), ChildProcesses = make_set(StartedChildProcess, 100000), ChildCommandlines = make_set(StartedChildProcessCmdline, 100000), DLLsLoaded = make_set(LoadedDLL, 100000), DLLSHA1 = make_set(LoadedDLLSHA1, 100000) by DeviceName, DeviceId, ServiceProcess, ServiceProcessCmdline, ServiceProcessCreationTime, ServiceProcessID, ServiceProcessUser, ServiceProcessSHA1, Description, Company
+| extend HostName = iff(DeviceName has '.', substring(DeviceName, 0, indexof(DeviceName, '.')), DeviceName)
+| extend DnsDomain = iff(DeviceName has '.', substring(DeviceName, indexof(DeviceName, '.') + 1), "")
+| join (UserLogons) on DeviceId
+| extend Logons = bag_pack("LastDevice",LastDevice, "LastUser",LastUser, "LogonType",LogonType, "LocalAdmin",IsLocalAdmin, "LastLogon",LastLogon)
+| extend Admin = iff(IsLocalAdmin== true,1,0)
+| summarize LastLogon = make_set(Logons), ProCmds = make_set(ServiceProcessCmdline), nAdmin=dcountif(DeviceId, Admin == 1), Net = make_set(ConnectedAddresses), URLs = make_set(ConnectedUrls), FileMods = make_set(FilesModified), ModPath = make_set(FileModFolderPath), cProcs = make_set(ChildProcesses), cCmds = make_set(ChildCommandlines), DLLs = make_set(DLLsLoaded) by ServiceProcess, Company, Description
+| extend 
+    LastLogon = set_difference(LastLogon, dynamic([null, ""])),
+    ProCmds = set_difference(ProCmds, dynamic([null, ""])),
+    Net = set_difference(Net, dynamic([null, ""])),
+    URLs = set_difference(URLs, dynamic([null, ""])),
+    FileMods = set_difference(FileMods, dynamic([null, ""])),
+    ModPath = set_difference(ModPath, dynamic([null, ""])),
+    cProcs = set_difference(cProcs, dynamic([null, ""])),
+    cCmds = set_difference(cCmds, dynamic([null, ""])),
+    DLLs = set_difference(DLLs, dynamic([null, ""]))
+| extend 
+    nNet = array_length(Net),
+    nURLs = array_length(URLs),
+    nMods = array_length(FileMods),
+    nModPaths = array_length(ModPath),
+    nDLLs = array_length(DLLs),
+    nDevices = array_length(LastLogon),
+    nCmd = array_length(ProCmds),
+    nCproc = array_length(cProcs),
+    nCcmd = array_length(cCmds)
+| project-reorder ServiceProcess, Company, Description, LastLogon, nDevices, nAdmin, nCmd, nNet,nURLs, nMods, nModPaths, nCproc, nCcmd, nDLLs, ProCmds, Net, URLs, FileMods, ModPath, cProcs, cCmds, DLLs
+| sort by nDevices desc
+
+//Rare Scripts Hunt
+search in (DeviceImageLoadEvents,DeviceProcessEvents,DeviceFileEvents,DeviceEvents,DeviceNetworkEvents) 'wscript.exe'
+| where TimeGenerated >= ago(30d)
+| summarize Acts=count() by ProcessCommandLine, InitiatingProcessCommandLine, InitiatingProcessParentFileName
+| sort by Acts desc
+
+//Guest and Admin Most Used Apps
+//Guest most used apps
+SigninLogs
+| where TimeGenerated >= ago(90d)
+| extend Device = parse_json(DeviceDetail)
+| extend isManaged = Device.isManaged
+| extend isCompliant = Device.isCompliant
+| extend operatingSystem = Device.operatingSystem
+| extend DeviceName = tostring(Device.displayName)
+| extend deviceId = Device.deviceId
+| where ResourceTenantId == 'YourTenantId'
+| where UserType != 'Member'
+| where IPAddress !contains ':'
+| summarize Hits=count() by AppDisplayName, User=UserPrincipalName, DeviceName, IPAddress, Location, tostring(LocationDetails)
+| sort by Hits
+
+//Admin and normal accounts of admins
+let AdminAccts = ( SigninLogs
+| where TimeGenerated >= ago(90d) and UserPrincipalName contains "AdminSignifier"
+| summarize Admins = make_set(UserPrincipalName)
+| extend AdminDailyAccts = extract_all("([^,]+)_a+", strcat_array(Admins,","))
+| project-away Admins );
+SigninLogs
+| where TimeGenerated >= ago(90d) and tolower(UserPrincipalName) has_any (AdminAccts)
+
+//Incident visual
+SecurityIncident
+| where TimeGenerated >= ago(60d)
+| where not(ClassificationComment matches regex "(Closed by MDR|Auto-resolved by MDR)")
+| extend User = replace_string(tolower(tostring(Owner.userPrincipalName)),'AdminSignifier','')
+| summarize IncidentsClosed=count() by endofday(TimeGenerated), User
+| render columnchart
+
+//Device Hunt
+//EncodedPowershell
+let EncodedList = dynamic(['-encodedcommand', '-enc']); // -e and -en can also be added, be aware of FPs
+let TimeFrame = 48h; //Customizable h = hours, d = days
+DeviceProcessEvents
+| where TimeGenerated > ago(TimeFrame)
+| where ProcessCommandLine contains "powershell" or InitiatingProcessCommandLine contains "powershell"
+| where ProcessCommandLine has_any (EncodedList) or InitiatingProcessCommandLine has_any (EncodedList)
+| extend base64String = extract(@'\s+([A-Za-z0-9+/]{20}\S+$)', 1, ProcessCommandLine)
+| extend DecodedCommandLine = base64_decode_tostring(base64String)
+| extend DecodedCommandLineReplaceEmptyPlaces = replace_string(DecodedCommandLine, '\u0000', '')
+| where isnotempty(base64String) and isnotempty(DecodedCommandLineReplaceEmptyPlaces)
+| summarize UniqueExecutionsList = make_set(DecodedCommandLineReplaceEmptyPlaces) by DeviceName
+| extend TotalUniqueEncodedCommandsExecuted = array_length(UniqueExecutionsList)
+| project DeviceName, TotalUniqueEncodedCommandsExecuted, UniqueExecutionsList
+| sort by TotalUniqueEncodedCommandsExecuted
+
+//Vague approximate Rule Usage
+SentinelHealth
+| where TimeGenerated >= ago(30d)
+| mv-expand ExtendedProperties
+| extend Hits = toint(ExtendedProperties.EntitiesGeneratedAmount)
+| summarize RuleUsage=sum(Hits) by SentinelResourceName
+
+CloudAppEvents
+| where TimeGenerated >= ago(7d)
+| where UncommonForUser contains "UserAgent" and DeviceType != 'Desktop'  and Application != 'Microsoft Exchange Online' and ActionType matches regex "(FileModified|FileUploaded|FileDownloaded|DownloadBlock|ExecuteMultiple |ExecuteTransaction |CompanyLinkCreated|AnonymousLinkUpdated|FileRecycled|FolderCreated|FolderRenamed|FolderModified|Add member to group|Add user|Update PasswordProfile|SecureLinkCreated|SharingLinkCreated|FolderMoved|FileMoved|SharingPolicyChanged|SiteCollectionAdminAdded|Add app role assignment grant to user|Consent to application|Add delegated permission grant|Remove member from group|Update user|ShareReport|SiteCollectionAdminRemoved|AnonymousLinkCreated|Add owner to group)" and AccountDisplayName !contains 'Admin'
+| project TimeGenerated, AccountDisplayName, ActionType, ObjectName, UserAgent, IsExternalUser, IsImpersonated, IPAddress, OSPlatform,  RawEventData, ActivityObjects, UncommonForUser
+
+//Email Final Destination Summary
+let Time = 90d;
+let Domains = dynamic (['domain1','domain2']);
+let Types = dynamic(["messages removed after delivery", "Email reported by user as malware or phish", "Email messages containing malicious URL removed after delivery", "Email messages from a campaign removed after delivery", "Email messages containing malicious file removed after delivery", "Phishing document"]);
+// Step 1: Extract alert-related metadata
+// Extract Message IDs
+let EmailEntities_MessageIds = (
+    SecurityAlert
+    | where TimeGenerated >= ago(Time)
+    | where DisplayName in (Types)
+    | mv-expand Entity = todynamic(Entities)
+    | where Entity.Type in~ ("mailCluster", "mailMessage")
+    | where tostring(Entity.LastVerdict) !~ "NoThreatsFound"
+    | extend MessageIdArray = Entity.NetworkMessageIds
+    | where isnotempty(MessageIdArray)
+    | mv-expand MessageId = MessageIdArray to typeof(string)
+    | extend NormalizedMessageId = tolower(replace_string(trim('\"{}', MessageId), " ", ""))
+    | project SystemAlertId, DisplayName, MessageId = NormalizedMessageId
+);
+// Extract File Hashes
+let EmailEntities_Hashes = (
+    SecurityAlert
+    | where TimeGenerated >= ago(Time)
+    | where DisplayName in (Types)
+    | mv-expand Entity = todynamic(Entities)
+    | where Entity.Type =~ "file"
+    | extend FileHashArray = Entity.FileHashes
+    | where isnotempty(FileHashArray)
+    | extend IndexArray = range(0, array_length(FileHashArray) - 1, 1)
+    | mv-expand Index = IndexArray to typeof(int)
+    | extend ExtractedHash = tostring(FileHashArray[Index].Value)
+    | project SystemAlertId, DisplayName, ExtractedHash
+);
+// Extract URLs
+let EmailEntities_Urls = (
+    SecurityAlert
+    | where TimeGenerated >= ago(Time)
+    | where DisplayName in (Types)
+    | mv-expand Entity = todynamic(Entities)
+    | where Entity.Type =~ "url"
+    | extend ExtractedUrl = tostring(Entity.Url)
+    | project SystemAlertId, DisplayName, ExtractedUrl
+);
+// Combine all
+let EmailEntities = (
+    union 
+        (EmailEntities_MessageIds | extend ExtractedHash = "", ExtractedUrl = ""),
+        (EmailEntities_Hashes | extend MessageId = "", ExtractedUrl = ""),
+        (EmailEntities_Urls | extend MessageId = "", ExtractedHash = "")
+    | summarize
+        MessageIds = make_set_if(MessageId, isnotempty(MessageId)),
+        Hashes = make_set_if(ExtractedHash, isnotempty(ExtractedHash)),
+        Urls = make_set_if(ExtractedUrl, isnotempty(ExtractedUrl))
+      by SystemAlertId, DisplayName
+);
+// Step 2: Expand and normalize Message IDs
+let ExpandedMessageIds = (
+    EmailEntities
+    | mv-expand MessageId = MessageIds
+    | extend MessageIdRaw = tostring(MessageId) // <— KEEP RAW
+    | extend NormalizedMessageId = tolower(replace_string(trim('\"{}', MessageIdRaw), " ", ""))
+);
+// Step 3: Normalize EmailPostDeliveryEvents
+let PostDelivery = (
+    EmailPostDeliveryEvents
+    | where TimeGenerated >= ago(Time)
+    | where ThreatTypes matches regex "(Phish|Malware)"
+    | where not(SenderFromAddress has_any (Domains))
+    | extend MessageId = tolower(replace_string(trim('\"{}', tostring(NetworkMessageId)), " ", ""))
+    // Final normalized logic
+    | extend NormalizedLocation = case(
+        // Primary: Use DeliveryLocation (more reliable than ActionType in most cases)
+        tolower(DeliveryLocation) has "Inbox", "Inbox",
+        tolower(DeliveryLocation) has "Junk", "Junk",
+        tolower(DeliveryLocation) has "Quarantine", "Quarantine",
+        tolower(DeliveryLocation) has "Delete", "Deleted",
+        tolower(DeliveryLocation) has_any("Drop", "Fail", "Blocked"), "Dropped",
+        tolower(DeliveryLocation) has "Custom", 
+            case(
+                tolower(Action) has "Quarantine release", "Inbox",
+                tolower(Action) has "Add message info only" and isempty(ActionType), "Inbox",
+                tolower(ActionType) has "ZAP", "Quarantine",
+                "Inbox" // default for custom if nothing else
+            ),
+        isempty(DeliveryLocation),
+            case(
+                tolower(Action) == "Reprocessed" and ActionType == "Redelivery", "Inbox",
+                tolower(Action) == "Quarantine release", "Inbox",
+                tolower(Action) == "Moved to inbox", "Inbox",
+                tolower(Action) == "Soft delete", "Deleted",
+                tolower(ActionType) has "ZAP", "Quarantine",
+                isempty(Action) and isempty(ActionType), "Inbox",
+                "Inbox"  // Safe fallback assumption: message reprocessed/soft-deleted often means already delivered
+            ),
+        "Inbox"  // Default if all else fails
+    )
+    | extend PD_Action = coalesce(ActionType, "None")
+    | project MessageId, PD_Action, PD_Location = NormalizedLocation
+);
+// Step 4: Normalize EmailEvents (fallback)
+let EmailFallback = (
+    EmailEvents
+    | where TimeGenerated >= ago(Time)
+    | where ThreatTypes matches regex "(Phish|Malware)"
+    | where SenderFromDomain !in~(Domains)
+    | extend MessageId = tolower(replace_string(trim('\"{}', tostring(NetworkMessageId)), " ", ""))
+    | where isnotempty(MessageId)
+    | extend NormalizedLocation = case(
+        tolower(coalesce(LatestDeliveryLocation, DeliveryLocation)) has_any ("Inbox","On-premises"), "Inbox",
+        tolower(coalesce(LatestDeliveryLocation, DeliveryLocation)) has "Deleted", "Deleted",
+        tolower(coalesce(LatestDeliveryLocation, DeliveryLocation)) has "Junk", "Junk",
+        tolower(coalesce(LatestDeliveryLocation, DeliveryLocation)) has_any ("Dropped", "Failed"), "Dropped",
+        tolower(coalesce(LatestDeliveryAction, DeliveryAction)) has "Blocked", "Quarantine",
+        tolower(coalesce(LatestDeliveryLocation, DeliveryLocation)) has "Quarantine", "Quarantine",
+        tolower(coalesce(LatestDeliveryLocation, DeliveryLocation)) has "Unknown", "Unclassified",
+        isnotempty(LatestDeliveryLocation), LatestDeliveryLocation,
+        isnotempty(DeliveryLocation), DeliveryLocation,
+        "Unclassified"
+    ),
+    EE_Action = coalesce(LatestDeliveryAction, DeliveryAction)
+    | project MessageId, EE_Action, EE_Location = NormalizedLocation);
+// Step 5: Join PostDelivery and Fallback with Message IDs
+let FinalEmailState = (
+    ExpandedMessageIds
+    | join kind=leftouter (
+        PostDelivery
+        | extend NormalizedMessageId = tostring(MessageId)
+    ) on NormalizedMessageId
+    | join kind=leftouter (
+        EmailFallback
+        | extend NormalizedMessageId = tostring(MessageId)
+    ) on NormalizedMessageId
+    | extend 
+        FinalizedAction = coalesce(PD_Action, EE_Action),
+        FinalizedLocation = coalesce(PD_Location, EE_Location),
+        FinalMessageId = coalesce(NormalizedMessageId, MessageIdRaw)
+    | project SystemAlertId, DisplayName, FinalMessageId, FinalizedAction, FinalizedLocation
+);
+// Step 6: Summarize final message state per alert
+let FinalSummary = (
+    FinalEmailState
+    | extend HasAction = isnotempty(FinalizedAction)
+    | extend HasLocation = isnotempty(FinalizedLocation)
+    | summarize 
+        Messages = count(),
+        Inbox = countif(FinalizedLocation == "Inbox"),
+        Quarantined = countif(FinalizedLocation == "Quarantine"),
+        Deleted = countif(FinalizedLocation == "Deleted"),
+        Junk = countif(FinalizedLocation == "Junk"),
+        Dropped = countif(FinalizedLocation == "Dropped"),
+        Unclassified = countif(FinalizedLocation == "Unclassified" or (HasAction == false and HasLocation == false)),
+        NetworkMessageIds = make_set_if(FinalMessageId, FinalizedLocation in~ ("Inbox","Unclassified"))
+    by SystemAlertId, DisplayName);
+// Step 7: Join summary with alert context
+FinalSummary
+| join kind=inner (EmailEntities) on SystemAlertId, DisplayName
+| project 
+    AlertId = SystemAlertId, 
+    AlertName = DisplayName, 
+    Messages, Inbox, Junk, Quarantined, Deleted, Dropped, Unclassified,
+    Urls, Hashes, NetworkMessageIds
+| project-reorder AlertName, Messages, Inbox, Junk, Quarantined, Deleted, Dropped, Unclassified
+| where (Inbox + Unclassified) > (Junk + Quarantined + Deleted + Dropped) and NetworkMessageIds != '[]'
+| sort by Messages desc

@@ -1,0 +1,22 @@
+    <PolicyRule Id="{bddfbc76-7f03-490e-9433-67774831c770}">
+        <!--Block All Removable Devices-->
+        <!--./Vendor/MSFT/Defender/Configuration/DeviceControl/PolicyRules/%7bbddfbc76-7f03-490e-9433-67774831c770%7d/RuleData-->
+        <Name>Block All Removable Devices</Name>
+        <IncludedIdList>
+            <GroupId>{a9e7c82c-8378-45ac-bdd6-071a0047f215}</GroupId><!--All Removable Devices-->
+        </IncludedIdList>
+        <ExcludedIdList>
+            <GroupId>{1ba4b5d0-9c03-46f6-9a23-4ed1f588ae68}</GroupId><!--TemperatureSensors-->
+            <GroupId>{9d9db0dd-39fe-4f28-864a-fbd9e0adc745}</GroupId><!--SecureUSB-->
+        </ExcludedIdList>
+        <Entry Id="{33c6e44a-3032-43cd-9281-3bee6e648d99}">
+            <Type>Deny</Type>
+            <Options>0</Options><!--Nothing-->
+            <AccessMask>7</AccessMask><!--Read and Write and Execute-->
+        </Entry>
+        <Entry Id="{4579abd4-001c-4905-9f3e-ebb74835ff58}">
+            <Type>AuditDenied</Type>
+            <Options>3</Options><!--event and toast-->
+            <AccessMask>7</AccessMask><!--Read, write, and Execute-->
+        </Entry>
+    </PolicyRule>

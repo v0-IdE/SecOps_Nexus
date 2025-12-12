@@ -1,0 +1,16 @@
+    <Group Id="{1ba4b5d0-9c03-46f6-9a23-4ed1f588ae68}">
+    <!--TemperatureSensors-->
+        <!--./Vendor/MSFT/Defender/Configuration/DeviceControl/PolicyGroups/%7b1ba4b5d0-9c03-46f6-9a23-4ed1f588ae68%7d/GroupData-->
+        <MatchType>MatchAny</MatchType>
+        <DescriptorIdList>
+		    <InstancePathId>USB\VID_10C4&amp;PID_0002\1*</InstancePathId> <!--EasyLog USB-->
+            <DeviceId>USBSTOR\DISK&amp;VEN_ATMEL&amp;PROD_ON-CHIP_VIRTUAL&amp;REV_1.00</DeviceId> <!--Sensitech ATMEL-->
+            <DeviceId>USBSTOR\Disk&amp;Ven_TTULTRA&amp;Prod_Sensitech_Inc.&amp;Rev_</DeviceId> <!--Sensitech TTULTRA-->
+            <DeviceId>USBSTOR\DISK&amp;VEN_ELPRO_-&amp;PROD_BUCHS_AG__LIBERO&amp;REV_0.01</DeviceId> <!--ELPRO - BUCHS AG LIBERO-->
+            <DeviceId>USBSTOR\DISK&amp;VEN_LAPIS&amp;PROD_MSCS_SCSI_BULK&amp;REV_1.00</DeviceId> <!--LAPIS MSCS SCSI Bulk USB-->
+		    <DeviceId>USBSTOR\DISK&amp;VEN_SONY&amp;PROD_DSC&amp;REV_1.00</DeviceId> <!--Sony DSC-->
+            <DeviceId>USBSTOR\DISK&amp;VEN_SONY&amp;PROD_MRW-E90&amp;REV_1.00</DeviceId> <!--Sony MRW-E90-->
+            <DeviceId>USBSTOR\DISK&amp;VEN_CANON&amp;PROD_MG8100_SERIES&amp;REV_0105</DeviceId> <!--Canon MG8100-->
+            <DeviceId>USBSTOR\DISK&amp;VEN_CANON&amp;PROD_MP810STORAGE&amp;REV_0102</DeviceId> <!--Canon MP810-->
+        </DescriptorIdList>
+    </Group>

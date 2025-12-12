@@ -1,0 +1,20 @@
+    <PolicyRule Id="{1b1d79bc-6ba3-4a80-90ec-8e7e3f6cc2eb}">
+        <!--Read Only Camera and Temperature Sensor Group-->
+        <!--./Vendor/MSFT/Defender/Configuration/DeviceControl/PolicyRules/%7b1b1d79bc-6ba3-4a80-90ec-8e7e3f6cc2eb%7d/RuleData-->
+        <Name>Read Only Cameras and Temperature Sensors</Name>
+        <IncludedIdList>
+            <GroupId>{1ba4b5d0-9c03-46f6-9a23-4ed1f588ae68}</GroupId><!--Read Only Devices-->
+        </IncludedIdList>
+        <ExcludedIdList>
+        </ExcludedIdList>
+        <Entry Id="{f25c27ee-5b49-4c09-b1d6-69d57801fa9c}">
+            <Type>Deny</Type>
+            <Options>0</Options>
+            <AccessMask>2</AccessMask>
+        </Entry>
+        <Entry Id="{1fd78235-8119-405f-a595-da3be4f2d19c}">
+            <Type>AuditDenied</Type>
+            <Options>3</Options>
+            <AccessMask>2</AccessMask>
+        </Entry>
+    </PolicyRule>

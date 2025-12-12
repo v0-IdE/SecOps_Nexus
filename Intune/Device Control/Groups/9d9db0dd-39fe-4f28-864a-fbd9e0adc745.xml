@@ -1,0 +1,15 @@
+    <Group Id="{9d9db0dd-39fe-4f28-864a-fbd9e0adc745}">
+    <!--SecureUSB-->
+        <!--./Vendor/MSFT/Defender/Configuration/DeviceControl/PolicyGroups/%7b9d9db0dd-39fe-4f28-864a-fbd9e0adc745%7d/GroupData-->
+        <MatchType>MatchAny</MatchType>
+        <DescriptorIdList>
+            <DeviceId>USBSTOR\Disk&amp;Ven_DL&amp;Prod_Sentry_3_FIPS&amp;Rev_PMAP</DeviceId> <!--Sentry 3 FIPS-->
+            <DeviceId>USBSTOR\CDROM&amp;VEN_DL&amp;PROD_SENTRY_3_FIPS&amp;REV_PMAP</DeviceId> <!--Sentry 3 FIPS CD-ROM Based WebLogin-->
+            <DeviceId>USBSTOR\Disk&amp;Ven_DLI&amp;Prod_DataLocker_DL3&amp;Rev_0001</DeviceId> <!--Sentry DataLocker DL3-->
+            <DeviceId>USBSTOR\Disk&amp;Ven_DLI&amp;Prod_SENTRY_K300&amp;Rev_0001</DeviceId> <!--Sentry K300-->
+            <DeviceId>USBSTOR\Disk&amp;Ven_Kingston&amp;Prod_DataTraveler_2.0&amp;Rev_1.00</DeviceId> <!--Kingston DataTraveler 2.0-->
+			<DeviceId>USBSTOR\DISK&amp;VEN_ISTORAGE&amp;PROD_DATASHUR&amp;REV_0139</DeviceId> <!--DataShur-->
+            <InstancePathId>USBSTOR\DISK&amp;VEN_UDISK&amp;PROD_GENERIC&amp;REV_5.00\6*</InstancePathId> <!--uDisk/Lepin Encrypted USB-->
+            <InstancePathId>USBSTOR\DISK&amp;VEN_&amp;PROD_&amp;REV_8.07\E5912481*</InstancePathId> <!--uDisk/Lepin Variant-->
+        </DescriptorIdList>
+    </Group>

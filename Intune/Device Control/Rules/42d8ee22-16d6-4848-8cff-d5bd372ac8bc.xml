@@ -1,0 +1,22 @@
+    <PolicyRule Id="{42d8ee22-16d6-4848-8cff-d5bd372ac8bc}">
+        <!--Allow Modify Access for SecureUSB-->
+        <!--./Vendor/MSFT/Defender/Configuration/DeviceControl/PolicyRules/%7b42d8ee22-16d6-4848-8cff-d5bd372ac8bc%7d/RuleData-->
+        <Name>Allow Modify Access for SecureUSB</Name>
+        <IncludedIdList>
+            <GroupId>{9d9db0dd-39fe-4f28-864a-fbd9e0adc745}</GroupId><!--SecureUSB-->
+        </IncludedIdList>
+        <ExcludedIdList>
+        </ExcludedIdList>
+        <Entry Id="{36d3c668-c2b5-4e0c-99c2-7163299ff605}">
+            <Type>Allow</Type>
+            <Options>0</Options>
+            <AccessMask>7</AccessMask>
+            <Sid>S-1-5-21-2477321085-2379324378-2019055037-33361</Sid><!--GG_SecureUSB SID-->
+        </Entry>
+        <Entry Id="{2a9ee07f-0204-47aa-a2f5-aaa0f4c4d2da}">
+            <Type>AuditAllowed</Type>
+            <Options>2</Options>
+            <AccessMask>7</AccessMask>
+            <Sid>S-1-5-21-2477321085-2379324378-2019055037-33361</Sid><!--GG_SecureUSB SID-->
+        </Entry>
+    </PolicyRule>
